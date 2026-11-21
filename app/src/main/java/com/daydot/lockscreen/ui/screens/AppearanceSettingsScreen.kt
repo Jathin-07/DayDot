@@ -271,4 +271,90 @@ fun AppearanceSettingsScreen(
                 Text(if (uiState.isApplyingWallpaper) "Applying..." else "Apply Appearance to Lock Screen")
             }
 
-            Spacer(modifier = Modifier.height(
+            Spacer(modifier = Modifier.height(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        letterSpacing = 1.4.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontWeight = FontWeight.Medium
+    )
+}
+
+@Composable
+private fun ColorSwatchRow(
+    colors: List<Long>,
+    selected: Long,
+    onSelect: (Long) -> Unit
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        colors.forEach { hex ->
+            val isSelected = hex == selected
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(Color(hex))
+                    .border(
+                        width = if (isSelected) 2.5.dp else 1.dp,
+                        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.25f),
+                        shape = CircleShape
+                    )
+                    .clickable { onSelect(hex) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun LabeledSlider(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit
+) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
+            valueRange = range
+        )
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(text = title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
