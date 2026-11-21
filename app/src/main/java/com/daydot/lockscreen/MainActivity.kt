@@ -131,3 +131,38 @@ private fun DayDotAppRoot(viewModel: DayDotViewModel = viewModel()) {
                     onQuickEditDate = { date ->
                         viewModel.openEditorForDate(date)
                         navigateToTab(DayDotRoute.REMINDERS.route)
+                    },
+                    onOpenLockScreenPreview = {
+                        navigateToTab(DayDotRoute.LOCK_SCREEN.route)
+                    },
+                    onApplyNow = { viewModel.applyToLockScreen() }
+                )
+            }
+
+            composable(DayDotRoute.REMINDERS.route) {
+                ReminderManagerScreen(
+                    uiState = uiState,
+                    initialEditDate = pendingEditDate,
+                    onClearInitialEditDate = viewModel::consumePendingEditDate,
+                    onSaveReminder = viewModel::saveReminder,
+                    onDeleteReminder = viewModel::deleteReminder
+                )
+            }
+
+            composable(DayDotRoute.APPEARANCE.route) {
+                AppearanceSettingsScreen(
+                    uiState = uiState,
+                    onUpdateAppearance = viewModel::updateAppearance
+                )
+            }
+
+            composable(DayDotRoute.LOCK_SCREEN.route) {
+                LockScreenPreviewScreen(
+                    uiState = uiState,
+                    onApplyToLockScreen = { viewModel.applyToLockScreen() },
+                    onManualFallback = { viewModel.exportAndLaunchFallbackPicker() }
+                )
+            }
+        }
+    }
+}
