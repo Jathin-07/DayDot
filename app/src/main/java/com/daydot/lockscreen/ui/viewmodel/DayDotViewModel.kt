@@ -10,6 +10,7 @@ import com.daydot.lockscreen.domain.WeekCalculator
 import com.daydot.lockscreen.domain.WeekDaySlot
 import com.daydot.lockscreen.scheduling.AlarmScheduler
 import com.daydot.lockscreen.wallpaper.WallpaperApplyResult
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -42,6 +43,11 @@ class DayDotViewModel(application: Application) : AndroidViewModel(application) 
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
 
+    private val _pendingEditDate = MutableStateFlow<LocalDate?>(null)
+    val pendingEditDate: StateFlow<LocalDate?> = _pendingEditDate.asStateFlow()
+
+    private var applyJob: Job? = null
+
     val uiState: StateFlow<DayDotUiState> = combine(
         _today,
         reminderRepo.observeAllReminders(),
@@ -71,6 +77,14 @@ class DayDotViewModel(application: Application) : AndroidViewModel(application) 
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = DayDotUiState()
     )
+
+    fun openEditorForDate(date: LocalDate) {
+        _pendingEditDate.value = date
+    }
+
+    fun consumePendingEditDate() {
+        _pendingEditDate.value = null
+    }
 
     fun refreshDateIfChanged() {
         val now = LocalDate.now()
@@ -108,8 +122,10 @@ class DayDotViewModel(application: Application) : AndroidViewModel(application) 
 
             val settings = appearanceRepo.getCurrentSettings()
             if (settings.autoApplyLockScreen) {
-                val result = wallpaperManager.renderAndApplyLockScreen(_today.value)
-                handleApplyResult(result, customSuccess = "Reminder saved and lock screen updated.")
+                applyToLockScreen(
+                    silent = false,
+                    customSuccess = "Reminder saved and lock screen updated."
+                )
             } else {
                 _snackbarMessage.value = "Reminder saved."
             }
@@ -123,51 +139,70 @@ class DayDotViewModel(application: Application) : AndroidViewModel(application) 
 
             val settings = appearanceRepo.getCurrentSettings()
             if (settings.autoApplyLockScreen) {
-                val result = wallpaperManager.renderAndApplyLockScreen(_today.value)
-                handleApplyResult(result, customSuccess = "Reminder deleted and lock screen updated.")
+                applyToLockScreen(
+                    silent = false,
+                    customSuccess = "Reminder deleted and lock screen updated."
+                )
             } else {
                 _snackbarMessage.value = "Reminder deleted."
             }
         }
     }
 
+    /**
+     * Saves appearance settings to DataStore without spamming WallpaperManager on every
+     * slider drag. Only applies to the Android lock screen when [applyImmediately] is true.
+     */
     fun updateAppearance(settings: AppearanceSettings, applyImmediately: Boolean = false) {
         viewModelScope.launch {
             appearanceRepo.saveSettings(settings)
-            if (applyImmediately || settings.autoApplyLockScreen) {
-                val result = wallpaperManager.renderAndApplyLockScreen(_today.value)
-                if (applyImmediately) {
-                    handleApplyResult(result, customSuccess = "Appearance applied to lock screen.")
-                } else if (result is WallpaperApplyResult.RestrictedFallbackNeeded) {
-                    _fallbackReason.value = result.reason
-                }
+            if (applyImmediately) {
+                applyToLockScreen(
+                    silent = false,
+                    customSuccess = "Appearance applied to lock screen."
+                )
             }
         }
     }
 
-    fun applyToLockScreen(silent: Boolean = false) {
-        viewModelScope.launch {
+    fun applyToLockScreen(
+        silent: Boolean = false,
+        customSuccess: String = "Lock screen wallpaper updated."
+    ) {
+        if (applyJob?.isActive == true) return
+        applyJob = viewModelScope.launch {
             _isApplying.value = true
-            val result = wallpaperManager.renderAndApplyLockScreen(_today.value)
-            _isApplying.value = false
-            if (!silent) {
-                handleApplyResult(result, customSuccess = "Lock screen wallpaper updated.")
-            } else if (result is WallpaperApplyResult.RestrictedFallbackNeeded) {
-                _fallbackReason.value = result.reason
+            try {
+                val result = wallpaperManager.renderAndApplyLockScreen(_today.value)
+                if (!silent) {
+                    handleApplyResult(result, customSuccess = customSuccess)
+                } else if (result is WallpaperApplyResult.RestrictedFallbackNeeded) {
+                    _fallbackReason.value = result.reason
+                }
+            } finally {
+                _isApplying.value = false
             }
         }
     }
 
     fun exportAndLaunchFallbackPicker() {
-        viewModelScope.launch {
+        if (applyJob?.isActive == true) return
+        applyJob = viewModelScope.launch {
             _isApplying.value = true
-            val exportResult = wallpaperManager.exportLockScreenImageToGallery(_today.value)
-            _isApplying.value = false
-            exportResult.onSuccess { uri ->
-                _snackbarMessage.value = "Saved to Pictures/DayDot. Choose 'Lock screen' in the picker."
-                wallpaperManager.launchSystemWallpaperPicker(uri)
-            }.onFailure { err ->
-                _snackbarMessage.value = "Could not save image: ${err.message ?: "Unknown error"}"
+            try {
+                val exportResult = wallpaperManager.exportLockScreenImageToGallery(_today.value)
+                exportResult.onSuccess { uri ->
+                    val launched = wallpaperManager.launchSystemWallpaperPicker(uri)
+                    _snackbarMessage.value = if (launched) {
+                        "Saved to Pictures/DayDot. Choose 'Lock screen' in the picker."
+                    } else {
+                        "Saved PNG to Pictures/DayDot. Open your Gallery app to set it as your lock screen."
+                    }
+                }.onFailure { err ->
+                    _snackbarMessage.value = "Could not save image: ${err.message ?: "Unknown error"}"
+                }
+            } finally {
+                _isApplying.value = false
             }
         }
     }
