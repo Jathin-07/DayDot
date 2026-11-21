@@ -26,6 +26,11 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,7 +69,17 @@ fun AppearanceSettingsScreen(
     uiState: DayDotUiState,
     onUpdateAppearance: (AppearanceSettings, Boolean) -> Unit
 ) {
-    val settings = uiState.appearance
+    // Smooth local draft state so sliders never lag or spam DataStore/WallpaperManager while dragging
+    var draft by remember { mutableStateOf(uiState.appearance) }
+
+    LaunchedEffect(uiState.appearance) {
+        draft = uiState.appearance
+    }
+
+    fun commitDraft(updated: AppearanceSettings, applyToLockScreen: Boolean = false) {
+        draft = updated
+        onUpdateAppearance(updated, applyToLockScreen)
+    }
 
     Column(
         modifier = Modifier
@@ -73,17 +88,17 @@ fun AppearanceSettingsScreen(
     ) {
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Live Preview pinned at top so every slider/color tweak updates immediately
+        // Live Preview pinned at top; updates smoothly at 60fps from local draft state
         LockScreenPreviewCard(
             today = uiState.today,
             weekSlots = uiState.weekSlots,
             todayReminder = uiState.todayReminder,
-            settings = settings,
+            settings = draft,
             showSystemClockPlaceholder = true,
             scaleFactor = 0.56f,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(230.dp)
+                .height(225.dp)
         )
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -101,20 +116,32 @@ fun AppearanceSettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterChip(
-                    selected = settings.backgroundColor == AppearancePresets.ObsidianGlow.backgroundColor &&
-                        settings.importantDayColor == AppearancePresets.ObsidianGlow.importantDayColor,
-                    onClick = { onUpdateAppearance(AppearancePresets.ObsidianGlow.copy(autoApplyLockScreen = settings.autoApplyLockScreen), false) },
+                    selected = draft.backgroundColor == AppearancePresets.ObsidianGlow.backgroundColor &&
+                        draft.importantDayColor == AppearancePresets.ObsidianGlow.importantDayColor,
+                    onClick = {
+                        commitDraft(
+                            AppearancePresets.ObsidianGlow.copy(autoApplyLockScreen = draft.autoApplyLockScreen)
+                        )
+                    },
                     label = { Text("Obsidian Glow") }
                 )
                 FilterChip(
-                    selected = settings.importantDayColor == AppearancePresets.CharcoalCoral.importantDayColor &&
-                        settings.backgroundColor == AppearancePresets.CharcoalCoral.backgroundColor,
-                    onClick = { onUpdateAppearance(AppearancePresets.CharcoalCoral.copy(autoApplyLockScreen = settings.autoApplyLockScreen), false) },
+                    selected = draft.importantDayColor == AppearancePresets.CharcoalCoral.importantDayColor &&
+                        draft.backgroundColor == AppearancePresets.CharcoalCoral.backgroundColor,
+                    onClick = {
+                        commitDraft(
+                            AppearancePresets.CharcoalCoral.copy(autoApplyLockScreen = draft.autoApplyLockScreen)
+                        )
+                    },
                     label = { Text("Charcoal Coral") }
                 )
                 FilterChip(
-                    selected = settings.backgroundColor == AppearancePresets.WarmPaper.backgroundColor,
-                    onClick = { onUpdateAppearance(AppearancePresets.WarmPaper.copy(autoApplyLockScreen = settings.autoApplyLockScreen), false) },
+                    selected = draft.backgroundColor == AppearancePresets.WarmPaper.backgroundColor,
+                    onClick = {
+                        commitDraft(
+                            AppearancePresets.WarmPaper.copy(autoApplyLockScreen = draft.autoApplyLockScreen)
+                        )
+                    },
                     label = { Text("Warm Paper") }
                 )
             }
@@ -123,16 +150,15 @@ fun AppearanceSettingsScreen(
             SectionLabel("BACKGROUND COLOR")
             ColorSwatchRow(
                 colors = BG_SWATCHES,
-                selected = settings.backgroundColor,
+                selected = draft.backgroundColor,
                 onSelect = { color ->
                     val isLight = color == 0xFFECEAE4L
-                    onUpdateAppearance(
-                        settings.copy(
+                    commitDraft(
+                        draft.copy(
                             backgroundColor = color,
                             primaryTextColor = if (isLight) 0xFF181818L else 0xFFFFFFFFL,
                             secondaryTextColor = if (isLight) 0xFF6E6C66L else 0xFF8E8E93L
-                        ),
-                        false
+                        )
                     )
                 }
             )
@@ -141,9 +167,9 @@ fun AppearanceSettingsScreen(
             SectionLabel("IMPORTANT DAY COLOR")
             ColorSwatchRow(
                 colors = ACCENT_SWATCHES,
-                selected = settings.importantDayColor,
+                selected = draft.importantDayColor,
                 onSelect = { color ->
-                    onUpdateAppearance(settings.copy(importantDayColor = color), false)
+                    commitDraft(draft.copy(importantDayColor = color))
                 }
             )
 
@@ -152,8 +178,8 @@ fun AppearanceSettingsScreen(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FontStyleOption.entries.forEach { option ->
                     FilterChip(
-                        selected = settings.fontStyle == option,
-                        onClick = { onUpdateAppearance(settings.copy(fontStyle = option), false) },
+                        selected = draft.fontStyle == option,
+                        onClick = { commitDraft(draft.copy(fontStyle = option)) },
                         label = { Text(option.label) }
                     )
                 }
@@ -164,76 +190,80 @@ fun AppearanceSettingsScreen(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 LayoutStyleOption.entries.forEach { option ->
                     FilterChip(
-                        selected = settings.layoutStyle == option,
-                        onClick = { onUpdateAppearance(settings.copy(layoutStyle = option), false) },
+                        selected = draft.layoutStyle == option,
+                        onClick = { commitDraft(draft.copy(layoutStyle = option)) },
                         label = { Text(option.label) }
                     )
                 }
             }
 
-            // Sliders
+            // Sliders update local preview live and persist cleanly when released
             LabeledSlider(
-                label = "Circle size (${settings.circleDiameterDp.toInt()} dp)",
-                value = settings.circleDiameterDp,
+                label = "Circle size (${draft.circleDiameterDp.toInt()} dp)",
+                value = draft.circleDiameterDp,
                 range = 16f..42f,
-                onValueChange = { onUpdateAppearance(settings.copy(circleDiameterDp = it), false) }
+                onValueChange = { draft = draft.copy(circleDiameterDp = it) },
+                onValueChangeFinished = { onUpdateAppearance(draft, false) }
             )
 
             LabeledSlider(
-                label = "Circle spacing (${settings.circleSpacingDp.toInt()} dp)",
-                value = settings.circleSpacingDp,
+                label = "Circle spacing (${draft.circleSpacingDp.toInt()} dp)",
+                value = draft.circleSpacingDp,
                 range = 6f..22f,
-                onValueChange = { onUpdateAppearance(settings.copy(circleSpacingDp = it), false) }
+                onValueChange = { draft = draft.copy(circleSpacingDp = it) },
+                onValueChangeFinished = { onUpdateAppearance(draft, false) }
             )
 
             LabeledSlider(
-                label = "Reminder text size (${settings.reminderFontSizeSp.toInt()} sp)",
-                value = settings.reminderFontSizeSp,
+                label = "Reminder text size (${draft.reminderFontSizeSp.toInt()} sp)",
+                value = draft.reminderFontSizeSp,
                 range = 16f..34f,
-                onValueChange = { onUpdateAppearance(settings.copy(reminderFontSizeSp = it), false) }
+                onValueChange = { draft = draft.copy(reminderFontSizeSp = it) },
+                onValueChangeFinished = { onUpdateAppearance(draft, false) }
             )
 
             LabeledSlider(
-                label = "Vertical position (${(settings.verticalOffsetPercent * 100).toInt()}% from top)",
-                value = settings.verticalOffsetPercent,
+                label = "Vertical position (${(draft.verticalOffsetPercent * 100).toInt()}% from top)",
+                value = draft.verticalOffsetPercent,
                 range = 0.42f..0.78f,
-                onValueChange = { onUpdateAppearance(settings.copy(verticalOffsetPercent = it), false) }
+                onValueChange = { draft = draft.copy(verticalOffsetPercent = it) },
+                onValueChangeFinished = { onUpdateAppearance(draft, false) }
             )
 
             // Toggles
             ToggleRow(
                 title = "Glow on important days",
                 subtitle = "Soft luminous halo around important circles",
-                checked = settings.glowOnImportant,
-                onCheckedChange = { onUpdateAppearance(settings.copy(glowOnImportant = it), false) }
+                checked = draft.glowOnImportant,
+                onCheckedChange = { commitDraft(draft.copy(glowOnImportant = it)) }
             )
             ToggleRow(
                 title = "Show weekday letters (M–S)",
                 subtitle = "Minimalist labels above each circle",
-                checked = settings.showDayLetters,
-                onCheckedChange = { onUpdateAppearance(settings.copy(showDayLetters = it), false) }
+                checked = draft.showDayLetters,
+                onCheckedChange = { commitDraft(draft.copy(showDayLetters = it)) }
             )
             ToggleRow(
                 title = "Show short note on lock screen",
                 subtitle = "Display optional subtitle below reminder",
-                checked = settings.showDescription,
-                onCheckedChange = { onUpdateAppearance(settings.copy(showDescription = it), false) }
+                checked = draft.showDescription,
+                onCheckedChange = { commitDraft(draft.copy(showDescription = it)) }
             )
             ToggleRow(
                 title = "Uppercase reminder title",
                 subtitle = "Editorial all-caps styling",
-                checked = settings.uppercaseTitle,
-                onCheckedChange = { onUpdateAppearance(settings.copy(uppercaseTitle = it), false) }
+                checked = draft.uppercaseTitle,
+                onCheckedChange = { commitDraft(draft.copy(uppercaseTitle = it)) }
             )
             ToggleRow(
-                title = "Auto-update lock screen",
-                subtitle = "Refresh lock screen automatically on changes and midnight",
-                checked = settings.autoApplyLockScreen,
-                onCheckedChange = { onUpdateAppearance(settings.copy(autoApplyLockScreen = it), false) }
+                title = "Auto-update at midnight & edits",
+                subtitle = "Refresh lock screen when reminders or date change",
+                checked = draft.autoApplyLockScreen,
+                onCheckedChange = { commitDraft(draft.copy(autoApplyLockScreen = it)) }
             )
 
             Button(
-                onClick = { onUpdateAppearance(settings, true) },
+                onClick = { commitDraft(draft, applyToLockScreen = true) },
                 enabled = !uiState.isApplyingWallpaper,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp)
@@ -241,88 +271,4 @@ fun AppearanceSettingsScreen(
                 Text(if (uiState.isApplyingWallpaper) "Applying..." else "Apply Appearance to Lock Screen")
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-        }
-    }
-}
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelSmall,
-        letterSpacing = 1.4.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        fontWeight = FontWeight.Medium
-    )
-}
-
-@Composable
-private fun ColorSwatchRow(
-    colors: List<Long>,
-    selected: Long,
-    onSelect: (Long) -> Unit
-) {
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        colors.forEach { hex ->
-            val isSelected = hex == selected
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(Color(hex))
-                    .border(
-                        width = if (isSelected) 2.5.dp else 1.dp,
-                        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.25f),
-                        shape = CircleShape
-                    )
-                    .clickable { onSelect(hex) }
-            )
-        }
-    }
-}
-
-@Composable
-private fun LabeledSlider(
-    label: String,
-    value: Float,
-    range: ClosedFloatingPointRange<Float>,
-    onValueChange: (Float) -> Unit
-) {
-    Column {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Slider(
-            value = value,
-            onValueChange = onValueChange,
-            valueRange = range
-        )
-    }
-}
-
-@Composable
-private fun ToggleRow(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(text = title, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
+            Spacer(modifier = Modifier.height(
