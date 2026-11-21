@@ -57,7 +57,7 @@ object LockScreenBitmapRenderer {
         }
         val boldTypeface = Typeface.create(baseTypeface, Typeface.BOLD)
 
-        val textAlign = when (settings.layoutStyle) {
+        val layoutAlignment = when (settings.layoutStyle) {
             LayoutStyleOption.LEFT_EDITORIAL -> Layout.Alignment.ALIGN_NORMAL
             LayoutStyleOption.CENTERED,
             LayoutStyleOption.COMPACT_BOTTOM -> Layout.Alignment.ALIGN_CENTER
@@ -80,7 +80,7 @@ object LockScreenBitmapRenderer {
         val dateText = today.format(DATE_SUBTITLE_FORMATTER).uppercase(Locale.getDefault())
         val dateLayout = StaticLayout.Builder
             .obtain(dateText, 0, dateText.length, datePaint, contentWidthPx)
-            .setAlignment(textAlign)
+            .setAlignment(layoutAlignment)
             .setMaxLines(1)
             .build()
 
@@ -107,7 +107,7 @@ object LockScreenBitmapRenderer {
         }
         val titleLayout = StaticLayout.Builder
             .obtain(displayTitle, 0, displayTitle.length, titlePaint, contentWidthPx)
-            .setAlignment(textAlign)
+            .setAlignment(layoutAlignment)
             .setLineSpacing(4f * density, 1.0f)
             .setMaxLines(3)
             .build()
@@ -129,7 +129,7 @@ object LockScreenBitmapRenderer {
             }
             val descLayout = StaticLayout.Builder
                 .obtain(description, 0, description.length, descPaint, contentWidthPx)
-                .setAlignment(textAlign)
+                .setAlignment(layoutAlignment)
                 .setLineSpacing(3f * density, 1.0f)
                 .setMaxLines(2)
                 .build()
@@ -166,7 +166,7 @@ object LockScreenBitmapRenderer {
             color = settings.secondaryTextColor.toInt()
             textSize = (10.5f * density)
             typeface = baseTypeface
-            textAlign = Paint.Align.CENTER
+            this.textAlign = Paint.Align.CENTER
         }
 
         val letterOffsetY = if (settings.showDayLetters) 18f * density else 0f
