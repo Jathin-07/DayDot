@@ -21,9 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.Lifecycle
@@ -31,6 +29,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -41,7 +40,6 @@ import com.daydot.lockscreen.ui.screens.LockScreenPreviewScreen
 import com.daydot.lockscreen.ui.screens.ReminderManagerScreen
 import com.daydot.lockscreen.ui.theme.DayDotTheme
 import com.daydot.lockscreen.ui.viewmodel.DayDotViewModel
-import java.time.LocalDate
 
 private enum class DayDotRoute(
     val route: String,
@@ -71,8 +69,8 @@ private fun DayDotAppRoot(viewModel: DayDotViewModel = viewModel()) {
     val navController = rememberNavController()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarMessage by viewModel.snackbarMessage.collectAsStateWithLifecycle()
+    val pendingEditDate by viewModel.pendingEditDate.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    var pendingEditDate by remember { mutableStateOf<LocalDate?>(null) }
 
     // Refresh today's date whenever the user returns to the app (e.g., after midnight)
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -97,6 +95,16 @@ private fun DayDotAppRoot(viewModel: DayDotViewModel = viewModel()) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
+    fun navigateToTab(route: String) {
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         bottomBar = {
@@ -104,13 +112,7 @@ private fun DayDotAppRoot(viewModel: DayDotViewModel = viewModel()) {
                 DayDotRoute.entries.forEach { tab ->
                     NavigationBarItem(
                         selected = currentRoute == tab.route,
-                        onClick = {
-                            navController.navigate(tab.route) {
-                                popUpTo(DayDotRoute.DASHBOARD.route) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
+                        onClick = { navigateToTab(tab.route) },
                         icon = { Icon(tab.icon, contentDescription = tab.label) },
                         label = { Text(tab.label) }
                     )
@@ -127,48 +129,5 @@ private fun DayDotAppRoot(viewModel: DayDotViewModel = viewModel()) {
                 DashboardScreen(
                     uiState = uiState,
                     onQuickEditDate = { date ->
-                        pendingEditDate = date
-                        navController.navigate(DayDotRoute.REMINDERS.route) {
-                            popUpTo(DayDotRoute.DASHBOARD.route) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    onOpenLockScreenPreview = {
-                        navController.navigate(DayDotRoute.LOCK_SCREEN.route) {
-                            popUpTo(DayDotRoute.DASHBOARD.route) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    onApplyNow = { viewModel.applyToLockScreen() }
-                )
-            }
-
-            composable(DayDotRoute.REMINDERS.route) {
-                ReminderManagerScreen(
-                    uiState = uiState,
-                    initialEditDate = pendingEditDate,
-                    onClearInitialEditDate = { pendingEditDate = null },
-                    onSaveReminder = viewModel::saveReminder,
-                    onDeleteReminder = viewModel::deleteReminder
-                )
-            }
-
-            composable(DayDotRoute.APPEARANCE.route) {
-                AppearanceSettingsScreen(
-                    uiState = uiState,
-                    onUpdateAppearance = viewModel::updateAppearance
-                )
-            }
-
-            composable(DayDotRoute.LOCK_SCREEN.route) {
-                LockScreenPreviewScreen(
-                    uiState = uiState,
-                    onApplyToLockScreen = { viewModel.applyToLockScreen() },
-                    onManualFallback = { viewModel.exportAndLaunchFallbackPicker() }
-                )
-            }
-        }
-    }
-}
+                        viewModel.openEditorForDate(date)
+                        navigateToTab(DayDotRoute.REMINDERS.route)
