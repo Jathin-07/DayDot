@@ -2,6 +2,7 @@ package com.daydot.lockscreen.data.prefs
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -37,12 +38,40 @@ class AppearanceRepository(private val context: Context) {
         val SHOW_DESCRIPTION = booleanPreferencesKey("show_description")
         val UPPERCASE_TITLE = booleanPreferencesKey("uppercase_title")
         val GLOW_ON_IMPORTANT = booleanPreferencesKey("glow_on_important")
+        val GLOW_INTENSITY = floatPreferencesKey("glow_intensity")
         val AUTO_APPLY = booleanPreferencesKey("auto_apply_lock_screen")
     }
 
-    val settingsFlow: Flow<AppearanceSettings> = context.appearanceDataStore.data.map { prefs ->
+    val settingsFlow: Flow<AppearanceSettings> = context.appearanceDataStore.data.map(::fromPreferences)
+
+    suspend fun getCurrentSettings(): AppearanceSettings = settingsFlow.first()
+
+    suspend fun saveSettings(settings: AppearanceSettings) {
+        context.appearanceDataStore.edit { prefs ->
+            writePreferences(prefs, settings)
+        }
+    }
+
+    /**
+     * Atomically reads the latest persisted preferences, applies [transform], and saves back
+     * inside a single DataStore transaction so concurrent edits can never overwrite each other.
+     */
+    suspend fun updateSettings(
+        transform: (AppearanceSettings) -> AppearanceSettings
+    ): AppearanceSettings {
+        var result = AppearanceSettings()
+        context.appearanceDataStore.edit { prefs ->
+            val current = fromPreferences(prefs)
+            val updated = transform(current)
+            writePreferences(prefs, updated)
+            result = updated
+        }
+        return result
+    }
+
+    private fun fromPreferences(prefs: Preferences): AppearanceSettings {
         val defaults = AppearanceSettings()
-        AppearanceSettings(
+        return AppearanceSettings(
             backgroundColor = prefs[Keys.BACKGROUND_COLOR] ?: defaults.backgroundColor,
             pastDayColor = prefs[Keys.PAST_DAY_COLOR] ?: defaults.pastDayColor,
             todayColor = prefs[Keys.TODAY_COLOR] ?: defaults.todayColor,
@@ -64,32 +93,30 @@ class AppearanceRepository(private val context: Context) {
             showDescription = prefs[Keys.SHOW_DESCRIPTION] ?: defaults.showDescription,
             uppercaseTitle = prefs[Keys.UPPERCASE_TITLE] ?: defaults.uppercaseTitle,
             glowOnImportant = prefs[Keys.GLOW_ON_IMPORTANT] ?: defaults.glowOnImportant,
+            glowIntensity = (prefs[Keys.GLOW_INTENSITY] ?: defaults.glowIntensity).coerceIn(0.2f, 1.0f),
             autoApplyLockScreen = prefs[Keys.AUTO_APPLY] ?: defaults.autoApplyLockScreen
         )
     }
 
-    suspend fun getCurrentSettings(): AppearanceSettings = settingsFlow.first()
-
-    suspend fun saveSettings(settings: AppearanceSettings) {
-        context.appearanceDataStore.edit { prefs ->
-            prefs[Keys.BACKGROUND_COLOR] = settings.backgroundColor
-            prefs[Keys.PAST_DAY_COLOR] = settings.pastDayColor
-            prefs[Keys.TODAY_COLOR] = settings.todayColor
-            prefs[Keys.UPCOMING_DAY_COLOR] = settings.upcomingDayColor
-            prefs[Keys.IMPORTANT_DAY_COLOR] = settings.importantDayColor
-            prefs[Keys.PRIMARY_TEXT_COLOR] = settings.primaryTextColor
-            prefs[Keys.SECONDARY_TEXT_COLOR] = settings.secondaryTextColor
-            prefs[Keys.FONT_STYLE] = settings.fontStyle.name
-            prefs[Keys.LAYOUT_STYLE] = settings.layoutStyle.name
-            prefs[Keys.CIRCLE_DIAMETER] = settings.circleDiameterDp
-            prefs[Keys.CIRCLE_SPACING] = settings.circleSpacingDp
-            prefs[Keys.REMINDER_FONT_SIZE] = settings.reminderFontSizeSp
-            prefs[Keys.VERTICAL_OFFSET] = settings.verticalOffsetPercent
-            prefs[Keys.SHOW_DAY_LETTERS] = settings.showDayLetters
-            prefs[Keys.SHOW_DESCRIPTION] = settings.showDescription
-            prefs[Keys.UPPERCASE_TITLE] = settings.uppercaseTitle
-            prefs[Keys.GLOW_ON_IMPORTANT] = settings.glowOnImportant
-            prefs[Keys.AUTO_APPLY] = settings.autoApplyLockScreen
-        }
+    private fun writePreferences(prefs: MutablePreferences, settings: AppearanceSettings) {
+        prefs[Keys.BACKGROUND_COLOR] = settings.backgroundColor
+        prefs[Keys.PAST_DAY_COLOR] = settings.pastDayColor
+        prefs[Keys.TODAY_COLOR] = settings.todayColor
+        prefs[Keys.UPCOMING_DAY_COLOR] = settings.upcomingDayColor
+        prefs[Keys.IMPORTANT_DAY_COLOR] = settings.importantDayColor
+        prefs[Keys.PRIMARY_TEXT_COLOR] = settings.primaryTextColor
+        prefs[Keys.SECONDARY_TEXT_COLOR] = settings.secondaryTextColor
+        prefs[Keys.FONT_STYLE] = settings.fontStyle.name
+        prefs[Keys.LAYOUT_STYLE] = settings.layoutStyle.name
+        prefs[Keys.CIRCLE_DIAMETER] = settings.circleDiameterDp
+        prefs[Keys.CIRCLE_SPACING] = settings.circleSpacingDp
+        prefs[Keys.REMINDER_FONT_SIZE] = settings.reminderFontSizeSp
+        prefs[Keys.VERTICAL_OFFSET] = settings.verticalOffsetPercent
+        prefs[Keys.SHOW_DAY_LETTERS] = settings.showDayLetters
+        prefs[Keys.SHOW_DESCRIPTION] = settings.showDescription
+        prefs[Keys.UPPERCASE_TITLE] = settings.uppercaseTitle
+        prefs[Keys.GLOW_ON_IMPORTANT] = settings.glowOnImportant
+        prefs[Keys.GLOW_INTENSITY] = settings.glowIntensity.coerceIn(0.2f, 1.0f)
+        prefs[Keys.AUTO_APPLY] = settings.autoApplyLockScreen
     }
 }
