@@ -21,7 +21,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * Renders the lock-screen wallpaper Bitmap using native Android Canvas.
+ * Single unified renderer used by BOTH the in-app previews and the real Android
+ * lock-screen wallpaper so every customization setting matches 1:1.
  * Deliberately leaves the upper ~38% empty so Android's native system clock
  * and notification area are never obscured or duplicated.
  */
@@ -39,16 +40,17 @@ object LockScreenBitmapRenderer {
         todayReminder: ReminderEntity?,
         settings: AppearanceSettings
     ): Bitmap {
-        val safeWidth = widthPx.coerceAtLeast(720)
-        val safeHeight = heightPx.coerceAtLeast(1280)
+        val safeWidth = widthPx.coerceAtLeast(320)
+        val safeHeight = heightPx.coerceAtLeast(560)
+        val safeDensity = density.coerceAtLeast(0.75f)
         val bitmap = Bitmap.createBitmap(safeWidth, safeHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
         // 1. Solid minimalist background
         canvas.drawColor(settings.backgroundColor.toInt())
 
-        val horizontalMarginPx = safeWidth * 0.10f
-        val contentWidthPx = (safeWidth - horizontalMarginPx * 2f).toInt().coerceAtLeast(200)
+        val horizontalMarginPx = safeWidth * 0.09f
+        val contentWidthPx = (safeWidth - horizontalMarginPx * 2f).toInt().coerceAtLeast(160)
 
         val baseTypeface = when (settings.fontStyle) {
             FontStyleOption.SANS -> Typeface.create("sans-serif", Typeface.NORMAL)
@@ -70,10 +72,10 @@ object LockScreenBitmapRenderer {
         }
         var cursorY = safeHeight * anchorFraction
 
-        // 2. Subtle date caption (e.g., "SATURDAY, 21 NOV") — never draws a clock
+        // 2. Subtle date caption (e.g., "SUNDAY, 22 NOV") — never draws a clock
         val datePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = settings.secondaryTextColor.toInt()
-            textSize = 12f * density
+            textSize = 12f * safeDensity
             typeface = baseTypeface
             letterSpacing = 0.14f
         }
@@ -88,12 +90,13 @@ object LockScreenBitmapRenderer {
         canvas.translate(horizontalMarginPx, cursorY)
         dateLayout.draw(canvas)
         canvas.restore()
-        cursorY += dateLayout.height + (14f * density)
+        cursorY += dateLayout.height + (12f * safeDensity)
 
         // 3. Today's primary reminder title (or subtle empty fallback)
         val rawTitle = todayReminder?.title?.takeIf { it.isNotBlank() } ?: "No reminder today"
         val displayTitle = if (settings.uppercaseTitle) rawTitle.uppercase(Locale.getDefault()) else rawTitle
         val isEmpty = todayReminder == null
+        val clampedFontSizeSp = settings.reminderFontSizeSp.coerceIn(14f, 36f)
 
         val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = if (isEmpty) {
@@ -101,14 +104,14 @@ object LockScreenBitmapRenderer {
             } else {
                 settings.primaryTextColor.toInt()
             }
-            textSize = settings.reminderFontSizeSp * density
+            textSize = clampedFontSizeSp * safeDensity
             typeface = if (isEmpty) baseTypeface else boldTypeface
             letterSpacing = if (settings.fontStyle == FontStyleOption.MONO) 0.02f else -0.01f
         }
         val titleLayout = StaticLayout.Builder
             .obtain(displayTitle, 0, displayTitle.length, titlePaint, contentWidthPx)
             .setAlignment(layoutAlignment)
-            .setLineSpacing(4f * density, 1.0f)
+            .setLineSpacing(4f * safeDensity, 1.0f)
             .setMaxLines(3)
             .build()
 
@@ -118,19 +121,19 @@ object LockScreenBitmapRenderer {
         canvas.restore()
         cursorY += titleLayout.height
 
-        // 4. Optional short description
+        // 4. Optional short note (strictly honors settings.showDescription)
         val description = todayReminder?.description?.takeIf { it.isNotBlank() }
         if (settings.showDescription && description != null) {
-            cursorY += 8f * density
+            cursorY += 8f * safeDensity
             val descPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = settings.secondaryTextColor.toInt()
-                textSize = (settings.reminderFontSizeSp * 0.62f).coerceAtLeast(12f) * density
+                textSize = (clampedFontSizeSp * 0.60f).coerceAtLeast(11f) * safeDensity
                 typeface = baseTypeface
             }
             val descLayout = StaticLayout.Builder
                 .obtain(description, 0, description.length, descPaint, contentWidthPx)
                 .setAlignment(layoutAlignment)
-                .setLineSpacing(3f * density, 1.0f)
+                .setLineSpacing(3f * safeDensity, 1.0f)
                 .setMaxLines(2)
                 .build()
 
@@ -142,11 +145,11 @@ object LockScreenBitmapRenderer {
         }
 
         // 5. Seven-circle Monday–Sunday weekly tracker
-        cursorY += 28f * density
+        cursorY += 26f * safeDensity
 
         val maxRowWidth = contentWidthPx.toFloat()
-        var diameterPx = settings.circleDiameterDp * density
-        var spacingPx = settings.circleSpacingDp * density
+        var diameterPx = settings.circleDiameterDp.coerceIn(14f, 44f) * safeDensity
+        var spacingPx = settings.circleSpacingDp.coerceIn(4f, 24f) * safeDensity
         val totalRequestedWidth = diameterPx * 7f + spacingPx * 6f
         if (totalRequestedWidth > maxRowWidth) {
             val scale = maxRowWidth / totalRequestedWidth
@@ -164,12 +167,22 @@ object LockScreenBitmapRenderer {
 
         val letterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = settings.secondaryTextColor.toInt()
-            textSize = (10.5f * density)
+            textSize = 12f * safeDensity
             typeface = baseTypeface
             this.textAlign = Paint.Align.CENTER
         }
 
-        val letterOffsetY = if (settings.showDayLetters) 18f * density else 0f
+        val glowIntensity = settings.glowIntensity.coerceIn(0.2f, 1.0f)
+        val extraTopGlowSpace = if (settings.glowOnImportant) {
+            (radiusPx * 0.45f * glowIntensity).coerceAtMost(12f * safeDensity)
+        } else {
+            4f * safeDensity
+        }
+        val letterOffsetY = if (settings.showDayLetters) {
+            (20f * safeDensity) + extraTopGlowSpace
+        } else {
+            0f
+        }
         val circleCenterY = cursorY + letterOffsetY + radiusPx
 
         val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -178,60 +191,80 @@ object LockScreenBitmapRenderer {
         val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
         }
+        val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = (1.8f * safeDensity).coerceAtLeast(1.8f)
+        }
+        val todayMarkerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = settings.todayColor.toInt()
+        }
 
         weekSlots.take(7).forEachIndexed { index, slot ->
             val centerX = rowStartX + radiusPx + index * (diameterPx + spacingPx)
 
             if (settings.showDayLetters) {
-                letterPaint.color = when (slot.state) {
-                    DayCircleState.TODAY_NORMAL,
-                    DayCircleState.TODAY_IMPORTANT -> settings.primaryTextColor.toInt()
-                    else -> applyAlpha(settings.secondaryTextColor.toInt(), 0.78f)
-                }
-                canvas.drawText(slot.shortLetter, centerX, cursorY + (10f * density), letterPaint)
-            }
-
-            val fillColor = resolveCircleColor(slot.state, settings)
-            val shouldGlow = when (slot.state) {
-                DayCircleState.TODAY_IMPORTANT -> true
-                DayCircleState.UPCOMING_IMPORTANT -> settings.glowOnImportant
-                else -> false
-            }
-
-            if (shouldGlow) {
-                val glowColor = if (slot.state == DayCircleState.TODAY_IMPORTANT) {
-                    Color.WHITE
+                letterPaint.color = if (slot.isToday) {
+                    settings.primaryTextColor.toInt()
                 } else {
-                    fillColor
+                    applyAlpha(settings.secondaryTextColor.toInt(), 0.78f)
                 }
-                val glowRadius = radiusPx * 2.15f
+                letterPaint.typeface = if (slot.isToday) boldTypeface else baseTypeface
+                canvas.drawText(slot.shortLetter, centerX, cursorY + (12f * safeDensity), letterPaint)
+            }
+
+            // Important-day color ALWAYS uses settings.importantDayColor, independent of today/past/upcoming
+            val fillColor = resolveCircleColor(slot.state, settings)
+            val isImportantDay = slot.isImportant
+
+            if (isImportantDay && settings.glowOnImportant) {
+                val glowColor = settings.importantDayColor.toInt()
+                val glowRadius = radiusPx * (1.55f + 0.85f * glowIntensity)
+                val innerAlpha = (0.30f + 0.45f * glowIntensity).coerceIn(0f, 1f)
+                val midAlpha = (0.12f + 0.18f * glowIntensity).coerceIn(0f, 1f)
+
                 glowPaint.shader = RadialGradient(
                     centerX,
                     circleCenterY,
                     glowRadius,
                     intArrayOf(
-                        applyAlpha(glowColor, 0.58f),
-                        applyAlpha(glowColor, 0.22f),
+                        applyAlpha(glowColor, innerAlpha),
+                        applyAlpha(glowColor, midAlpha),
                         applyAlpha(glowColor, 0.0f)
                     ),
-                    floatArrayOf(0.35f, 0.68f, 1.0f),
+                    floatArrayOf(0.32f, 0.66f, 1.0f),
                     Shader.TileMode.CLAMP
                 )
                 canvas.drawCircle(centerX, circleCenterY, glowRadius, glowPaint)
+            } else if (isImportantDay) {
+                // Distinct crisp outer ring when glow is turned OFF so important days stay recognizable
+                ringPaint.color = applyAlpha(settings.importantDayColor.toInt(), 0.85f)
+                canvas.drawCircle(centerX, circleCenterY, radiusPx + (3.5f * safeDensity), ringPaint)
             }
 
             circlePaint.color = fillColor
             canvas.drawCircle(centerX, circleCenterY, radiusPx, circlePaint)
+
+            // Independent subtle current-day indicator dot below today's circle
+            if (slot.isToday) {
+                val markerY = circleCenterY + radiusPx + (8.5f * safeDensity)
+                canvas.drawCircle(centerX, markerY, (2.4f * safeDensity).coerceAtLeast(2.2f), todayMarkerPaint)
+            }
         }
 
         return bitmap
     }
 
+    /**
+     * Resolves fill color strictly by calendar state.
+     * Any date marked important (past, today, or upcoming) ALWAYS receives settings.importantDayColor.
+     */
     fun resolveCircleColor(state: DayCircleState, settings: AppearanceSettings): Int {
         return when (state) {
             DayCircleState.PAST -> settings.pastDayColor.toInt()
+            DayCircleState.PAST_IMPORTANT -> settings.importantDayColor.toInt()
             DayCircleState.TODAY_NORMAL -> settings.todayColor.toInt()
-            DayCircleState.TODAY_IMPORTANT -> Color.WHITE
+            DayCircleState.TODAY_IMPORTANT -> settings.importantDayColor.toInt()
             DayCircleState.UPCOMING_NORMAL -> settings.upcomingDayColor.toInt()
             DayCircleState.UPCOMING_IMPORTANT -> settings.importantDayColor.toInt()
         }
