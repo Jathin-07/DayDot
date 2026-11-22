@@ -106,7 +106,7 @@ fun DashboardScreen(
                         style = MaterialTheme.typography.labelSmall,
                         letterSpacing = 1.4.sp,
                         color = if (todayReminder?.isImportant == true) {
-                            Color.White
+                            Color(uiState.appearance.importantDayColor)
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         }
@@ -201,7 +201,7 @@ fun DashboardScreen(
                 // Quick-tap day list for the current Mon–Sun week
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     uiState.weekSlots.forEach { slot ->
-                        val isToday = slot.date.isEqual(uiState.today)
+                        val isToday = slot.isToday
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -217,8 +217,9 @@ fun DashboardScreen(
                         ) {
                             val dotColor = when (slot.state) {
                                 DayCircleState.PAST -> Color(uiState.appearance.pastDayColor)
+                                DayCircleState.PAST_IMPORTANT -> Color(uiState.appearance.importantDayColor)
                                 DayCircleState.TODAY_NORMAL -> Color(uiState.appearance.todayColor)
-                                DayCircleState.TODAY_IMPORTANT -> Color.White
+                                DayCircleState.TODAY_IMPORTANT -> Color(uiState.appearance.importantDayColor)
                                 DayCircleState.UPCOMING_NORMAL -> Color(uiState.appearance.upcomingDayColor)
                                 DayCircleState.UPCOMING_IMPORTANT -> Color(uiState.appearance.importantDayColor)
                             }
