@@ -184,15 +184,18 @@ class LockScreenWallpaperManager(
     }
 
     private fun resolveDisplayMetrics(): Triple<Int, Int, Float> {
-        val density = Resources.getSystem().displayMetrics.density.coerceAtLeast(1f)
+        val appDensity = context.resources.displayMetrics.density
+            .takeIf { it > 0f }
+            ?: Resources.getSystem().displayMetrics.density.coerceAtLeast(1f)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val wm = context.getSystemService(WindowManager::class.java)
             val bounds = wm?.maximumWindowMetrics?.bounds
             if (bounds != null && bounds.width() > 0 && bounds.height() > 0) {
-                return Triple(bounds.width(), bounds.height(), density)
+                return Triple(bounds.width(), bounds.height(), appDensity)
             }
         }
-        val metrics = Resources.getSystem().displayMetrics
-        return Triple(metrics.widthPixels, metrics.heightPixels, density)
+        val metrics = context.resources.displayMetrics
+        return Triple(metrics.widthPixels, metrics.heightPixels, appDensity)
     }
 }
