@@ -31,8 +31,24 @@ data class AppearanceSettings(
     val showDescription: Boolean = true,
     val uppercaseTitle: Boolean = false,
     val glowOnImportant: Boolean = true,
+    /** Glow halo strength for important days (0.20..1.00). */
+    val glowIntensity: Float = 0.75f,
     val autoApplyLockScreen: Boolean = true
-)
+) {
+    /**
+     * Applies only the color palette from [preset] without overwriting the user's
+     * circle size, spacing, text size, typography, layout, or display toggles.
+     */
+    fun applyColorPreset(preset: AppearanceSettings): AppearanceSettings = copy(
+        backgroundColor = preset.backgroundColor,
+        pastDayColor = preset.pastDayColor,
+        todayColor = preset.todayColor,
+        upcomingDayColor = preset.upcomingDayColor,
+        importantDayColor = preset.importantDayColor,
+        primaryTextColor = preset.primaryTextColor,
+        secondaryTextColor = preset.secondaryTextColor
+    )
+}
 
 object AppearancePresets {
     /** Default dark minimalist theme with dimmed past circles and bright glowing white important days. */
@@ -46,8 +62,7 @@ object AppearancePresets {
         upcomingDayColor = 0xFF777777L,
         importantDayColor = 0xFFD98282L,
         primaryTextColor = 0xFFFFFFFFL,
-        secondaryTextColor = 0xFF8C8C92L,
-        glowOnImportant = true
+        secondaryTextColor = 0xFF8C8C92L
     )
 
     /** Warm off-white editorial theme inspired by classic Dieter Rams geometric calendar prints. */
@@ -58,8 +73,6 @@ object AppearancePresets {
         upcomingDayColor = 0xFFBDBAB3L,
         importantDayColor = 0xFFEE6322L,
         primaryTextColor = 0xFF181818L,
-        secondaryTextColor = 0xFF6E6C66L,
-        layoutStyle = LayoutStyleOption.LEFT_EDITORIAL,
-        glowOnImportant = false
+        secondaryTextColor = 0xFF6E6C66L
     )
 }
