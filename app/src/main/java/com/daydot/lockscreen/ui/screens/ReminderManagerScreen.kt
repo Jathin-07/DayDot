@@ -168,6 +168,7 @@ fun ReminderManagerScreen(
                         reminder = item,
                         isToday = item.localDate().isEqual(uiState.today),
                         isPast = false,
+                        importantColor = Color(uiState.appearance.importantDayColor),
                         onEdit = { editingDate = item.localDate() },
                         onDelete = { onDeleteReminder(item.localDate()) }
                     )
@@ -189,6 +190,7 @@ fun ReminderManagerScreen(
                         reminder = item,
                         isToday = false,
                         isPast = true,
+                        importantColor = Color(uiState.appearance.importantDayColor),
                         onEdit = { editingDate = item.localDate() },
                         onDelete = { onDeleteReminder(item.localDate()) }
                     )
@@ -234,6 +236,7 @@ private fun ReminderRowCard(
     reminder: ReminderEntity,
     isToday: Boolean,
     isPast: Boolean,
+    importantColor: Color,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -255,8 +258,8 @@ private fun ReminderRowCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             val dotColor = when {
+                reminder.isImportant -> importantColor
                 isPast -> Color(0xFF3F3F42)
-                reminder.isImportant -> Color.White
                 isToday -> Color.White
                 else -> Color(0xFF777777)
             }
@@ -285,7 +288,7 @@ private fun ReminderRowCard(
                         Text(
                             text = "IMPORTANT",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.White,
+                            color = importantColor,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -399,146 +402,3 @@ private fun ReminderEditorDialog(
                     maxLines = 2,
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Important deadline", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            text = "Glows bright white on the lock screen",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = isImportant,
-                        onCheckedChange = { isImportant = it }
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val timeLabel = notifyMinutes?.let {
-                        LocalTime.of(it / 60, it % 60).format(NOTIFY_TIME_FORMAT)
-                    } ?: "Off"
-
-                    OutlinedButton(
-                        onClick = {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                val granted = ContextCompat.checkSelfPermission(
-                                    context,
-                                    Manifest.permission.POST_NOTIFICATIONS
-                                ) == PackageManager.PERMISSION_GRANTED
-                                if (!granted) {
-                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                } else {
-                                    showTimePicker = true
-                                }
-                            } else {
-                                showTimePicker = true
-                            }
-                        },
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (notifyMinutes != null) Icons.Outlined.NotificationsActive
-                            else Icons.Outlined.NotificationsOff,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.size(6.dp))
-                        Text("Notify: $timeLabel")
-                    }
-
-                    if (notifyMinutes != null) {
-                        TextButton(onClick = { notifyMinutes = null }) {
-                            Text("Clear")
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onSave(selectedDate, title, description, isImportant, notifyMinutes)
-                },
-                enabled = title.isNotBlank()
-            ) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (existingForSelectedDate != null) {
-                    TextButton(onClick = { onDelete(selectedDate) }) {
-                        Text("Delete", color = MaterialTheme.colorScheme.error)
-                    }
-                }
-                TextButton(onClick = onDismiss) {
-                    Text("Cancel")
-                }
-            }
-        }
-    )
-
-    if (showDatePicker) {
-        val initialMillis = selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        datePickerState.selectedDateMillis?.let { millis ->
-                            selectedDate = Instant.ofEpochMilli(millis)
-                                .atZone(ZoneOffset.UTC)
-                                .toLocalDate()
-                        }
-                        showDatePicker = false
-                    }
-                ) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
-            }
-        ) {
-            DatePicker(state = datePickerState)
-        }
-    }
-
-    if (showTimePicker) {
-        val currentHour = (notifyMinutes ?: (9 * 60)) / 60
-        val currentMinute = (notifyMinutes ?: (9 * 60)) % 60
-        val timePickerState = rememberTimePickerState(
-            initialHour = currentHour,
-            initialMinute = currentMinute
-        )
-        AlertDialog(
-            onDismissRequest = { showTimePicker = false },
-            title = { Text("Notification Time") },
-            text = {
-                Box(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    TimePicker(state = timePickerState)
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        notifyMinutes = timePickerState.hour * 60 + timePickerState.minute
-                        showTimePicker = false
-                    }
-                ) { Text("Set") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
-            }
-        )
-    }
-}
