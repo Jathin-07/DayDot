@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,13 +21,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,39 +70,108 @@ fun AppearanceSettingsScreen(
     uiState: DayDotUiState,
     onUpdateAppearance: (AppearanceSettings, Boolean) -> Unit
 ) {
-    // Smooth local draft state so sliders never lag or spam DataStore/WallpaperManager while dragging
-    var draft by remember { mutableStateOf(uiState.appearance) }
-
-    LaunchedEffect(uiState.appearance) {
-        draft = uiState.appearance
+    // Wait until DataStore finishes loading persisted settings so defaults can never overwrite saved values
+    if (!uiState.isAppearanceLoaded) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+        return
     }
 
-    fun commitDraft(updated: AppearanceSettings, applyToLockScreen: Boolean = false) {
-        draft = updated
-        onUpdateAppearance(updated, applyToLockScreen)
-    }
+    val persisted = uiState.appearance
+
+    // Lightweight per-slider drag overrides so dragging is 60fps without overwriting unrelated fields
+    var dragCircleSize by remember { mutableStateOf<Float?>(null) }
+    var dragCircleSpacing by remember { mutableStateOf<Float?>(null) }
+    var dragTextSize by remember { mutableStateOf<Float?>(null) }
+    var dragVerticalOffset by remember { mutableStateOf<Float?>(null) }
+    var dragGlowIntensity by remember { mutableStateOf<Float?>(null) }
+
+    val effective = persisted.copy(
+        circleDiameterDp = dragCircleSize ?: persisted.circleDiameterDp,
+        circleSpacingDp = dragCircleSpacing ?: persisted.circleSpacingDp,
+        reminderFontSizeSp = dragTextSize ?: persisted.reminderFontSizeSp,
+        verticalOffsetPercent = dragVerticalOffset ?: persisted.verticalOffsetPercent,
+        glowIntensity = dragGlowIntensity ?: persisted.glowIntensity
+    )
+
+    val hasTodayNote = !uiState.todayReminder?.description.isNullOrBlank()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 20.dp)
     ) {
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Live Preview pinned at top; updates smoothly at 60fps from local draft state
-        LockScreenPreviewCard(
-            today = uiState.today,
-            weekSlots = uiState.weekSlots,
-            todayReminder = uiState.todayReminder,
-            settings = draft,
-            showSystemClockPlaceholder = true,
-            scaleFactor = 0.56f,
+        // Live 9:19.5 phone-aspect preview powered by the exact LockScreenBitmapRenderer
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(225.dp)
-        )
+                .height(248.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            LockScreenPreviewCard(
+                today = uiState.today,
+                weekSlots = uiState.weekSlots,
+                todayReminder = uiState.todayReminder,
+                settings = effective,
+                showSystemClockPlaceholder = true,
+                scaleFactor = 0.52f,
+                modifier = Modifier
+                    .height(248.dp)
+                    .aspectRatio(9f / 19.5f)
+            )
 
-        Spacer(modifier = Modifier.height(12.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "LIVE PREVIEW",
+                    style = MaterialTheme.typography.labelSmall,
+                    letterSpacing = 1.4.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Circles: ${effective.circleDiameterDp.toInt()}dp · Gap: ${effective.circleSpacingDp.toInt()}dp",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Text: ${effective.reminderFontSizeSp.toInt()}sp · Pos: ${(effective.verticalOffsetPercent * 100).toInt()}%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Glow: ${if (effective.glowOnImportant) "${(effective.glowIntensity * 100).toInt()}%" else "Off"} · Letters: ${if (effective.showDayLetters) "On" else "Off"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Short note: ${if (effective.showDescription) "On" else "Off"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Button(
+                    onClick = { onUpdateAppearance(effective, true) },
+                    enabled = !uiState.isApplyingWallpaper,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text(if (uiState.isApplyingWallpaper) "Applying..." else "Apply Now")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
 
         Column(
             modifier = Modifier
@@ -109,38 +179,32 @@ fun AppearanceSettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // Theme Presets
-            SectionLabel("STYLE PRESETS")
+            // Color Presets (preserve circle size, spacing, text size, glow, and toggles!)
+            SectionLabel("COLOR PRESETS")
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterChip(
-                    selected = draft.backgroundColor == AppearancePresets.ObsidianGlow.backgroundColor &&
-                        draft.importantDayColor == AppearancePresets.ObsidianGlow.importantDayColor,
+                    selected = effective.backgroundColor == AppearancePresets.ObsidianGlow.backgroundColor &&
+                        effective.importantDayColor == AppearancePresets.ObsidianGlow.importantDayColor,
                     onClick = {
-                        commitDraft(
-                            AppearancePresets.ObsidianGlow.copy(autoApplyLockScreen = draft.autoApplyLockScreen)
-                        )
+                        onUpdateAppearance(effective.applyColorPreset(AppearancePresets.ObsidianGlow), false)
                     },
                     label = { Text("Obsidian Glow") }
                 )
                 FilterChip(
-                    selected = draft.importantDayColor == AppearancePresets.CharcoalCoral.importantDayColor &&
-                        draft.backgroundColor == AppearancePresets.CharcoalCoral.backgroundColor,
+                    selected = effective.importantDayColor == AppearancePresets.CharcoalCoral.importantDayColor &&
+                        effective.backgroundColor == AppearancePresets.CharcoalCoral.backgroundColor,
                     onClick = {
-                        commitDraft(
-                            AppearancePresets.CharcoalCoral.copy(autoApplyLockScreen = draft.autoApplyLockScreen)
-                        )
+                        onUpdateAppearance(effective.applyColorPreset(AppearancePresets.CharcoalCoral), false)
                     },
                     label = { Text("Charcoal Coral") }
                 )
                 FilterChip(
-                    selected = draft.backgroundColor == AppearancePresets.WarmPaper.backgroundColor,
+                    selected = effective.backgroundColor == AppearancePresets.WarmPaper.backgroundColor,
                     onClick = {
-                        commitDraft(
-                            AppearancePresets.WarmPaper.copy(autoApplyLockScreen = draft.autoApplyLockScreen)
-                        )
+                        onUpdateAppearance(effective.applyColorPreset(AppearancePresets.WarmPaper), false)
                     },
                     label = { Text("Warm Paper") }
                 )
@@ -150,15 +214,16 @@ fun AppearanceSettingsScreen(
             SectionLabel("BACKGROUND COLOR")
             ColorSwatchRow(
                 colors = BG_SWATCHES,
-                selected = draft.backgroundColor,
+                selected = effective.backgroundColor,
                 onSelect = { color ->
                     val isLight = color == 0xFFECEAE4L
-                    commitDraft(
-                        draft.copy(
+                    onUpdateAppearance(
+                        effective.copy(
                             backgroundColor = color,
                             primaryTextColor = if (isLight) 0xFF181818L else 0xFFFFFFFFL,
                             secondaryTextColor = if (isLight) 0xFF6E6C66L else 0xFF8E8E93L
-                        )
+                        ),
+                        false
                     )
                 }
             )
@@ -167,9 +232,9 @@ fun AppearanceSettingsScreen(
             SectionLabel("IMPORTANT DAY COLOR")
             ColorSwatchRow(
                 colors = ACCENT_SWATCHES,
-                selected = draft.importantDayColor,
+                selected = effective.importantDayColor,
                 onSelect = { color ->
-                    commitDraft(draft.copy(importantDayColor = color))
+                    onUpdateAppearance(effective.copy(importantDayColor = color), false)
                 }
             )
 
@@ -178,8 +243,8 @@ fun AppearanceSettingsScreen(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FontStyleOption.entries.forEach { option ->
                     FilterChip(
-                        selected = draft.fontStyle == option,
-                        onClick = { commitDraft(draft.copy(fontStyle = option)) },
+                        selected = effective.fontStyle == option,
+                        onClick = { onUpdateAppearance(effective.copy(fontStyle = option), false) },
                         label = { Text(option.label) }
                     )
                 }
@@ -190,80 +255,122 @@ fun AppearanceSettingsScreen(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 LayoutStyleOption.entries.forEach { option ->
                     FilterChip(
-                        selected = draft.layoutStyle == option,
-                        onClick = { commitDraft(draft.copy(layoutStyle = option)) },
+                        selected = effective.layoutStyle == option,
+                        onClick = { onUpdateAppearance(effective.copy(layoutStyle = option), false) },
                         label = { Text(option.label) }
                     )
                 }
             }
 
-            // Sliders update local preview live and persist cleanly when released
+            // Size & Spacing Sliders
             LabeledSlider(
-                label = "Circle size (${draft.circleDiameterDp.toInt()} dp)",
-                value = draft.circleDiameterDp,
-                range = 16f..42f,
-                onValueChange = { draft = draft.copy(circleDiameterDp = it) },
-                onValueChangeFinished = { onUpdateAppearance(draft, false) }
+                label = "Circle size (${effective.circleDiameterDp.toInt()} dp)",
+                value = effective.circleDiameterDp,
+                range = 14f..44f,
+                onValueChange = { dragCircleSize = it },
+                onValueChangeFinished = {
+                    val finalVal = dragCircleSize ?: effective.circleDiameterDp
+                    dragCircleSize = null
+                    onUpdateAppearance(effective.copy(circleDiameterDp = finalVal), false)
+                }
             )
 
             LabeledSlider(
-                label = "Circle spacing (${draft.circleSpacingDp.toInt()} dp)",
-                value = draft.circleSpacingDp,
-                range = 6f..22f,
-                onValueChange = { draft = draft.copy(circleSpacingDp = it) },
-                onValueChangeFinished = { onUpdateAppearance(draft, false) }
+                label = "Circle spacing (${effective.circleSpacingDp.toInt()} dp)",
+                value = effective.circleSpacingDp,
+                range = 4f..24f,
+                onValueChange = { dragCircleSpacing = it },
+                onValueChangeFinished = {
+                    val finalVal = dragCircleSpacing ?: effective.circleSpacingDp
+                    dragCircleSpacing = null
+                    onUpdateAppearance(effective.copy(circleSpacingDp = finalVal), false)
+                }
             )
 
             LabeledSlider(
-                label = "Reminder text size (${draft.reminderFontSizeSp.toInt()} sp)",
-                value = draft.reminderFontSizeSp,
-                range = 16f..34f,
-                onValueChange = { draft = draft.copy(reminderFontSizeSp = it) },
-                onValueChangeFinished = { onUpdateAppearance(draft, false) }
+                label = "Reminder text size (${effective.reminderFontSizeSp.toInt()} sp)",
+                value = effective.reminderFontSizeSp,
+                range = 14f..36f,
+                onValueChange = { dragTextSize = it },
+                onValueChangeFinished = {
+                    val finalVal = dragTextSize ?: effective.reminderFontSizeSp
+                    dragTextSize = null
+                    onUpdateAppearance(effective.copy(reminderFontSizeSp = finalVal), false)
+                }
             )
 
             LabeledSlider(
-                label = "Vertical position (${(draft.verticalOffsetPercent * 100).toInt()}% from top)",
-                value = draft.verticalOffsetPercent,
+                label = "Vertical position (${(effective.verticalOffsetPercent * 100).toInt()}% from top)",
+                value = effective.verticalOffsetPercent,
                 range = 0.42f..0.78f,
-                onValueChange = { draft = draft.copy(verticalOffsetPercent = it) },
-                onValueChangeFinished = { onUpdateAppearance(draft, false) }
+                onValueChange = { dragVerticalOffset = it },
+                onValueChangeFinished = {
+                    val finalVal = dragVerticalOffset ?: effective.verticalOffsetPercent
+                    dragVerticalOffset = null
+                    onUpdateAppearance(effective.copy(verticalOffsetPercent = finalVal), false)
+                }
             )
 
-            // Toggles
+            // Display & Glow Controls
             ToggleRow(
                 title = "Glow on important days",
-                subtitle = "Soft luminous halo around important circles",
-                checked = draft.glowOnImportant,
-                onCheckedChange = { commitDraft(draft.copy(glowOnImportant = it)) }
+                subtitle = if (effective.glowOnImportant) {
+                    "Soft luminous halo around important circles"
+                } else {
+                    "Off — important days show a crisp outline ring instead"
+                },
+                checked = effective.glowOnImportant,
+                onCheckedChange = { onUpdateAppearance(effective.copy(glowOnImportant = it), false) }
             )
+
+            if (effective.glowOnImportant) {
+                LabeledSlider(
+                    label = "Glow intensity (${(effective.glowIntensity * 100).toInt()}%)",
+                    value = effective.glowIntensity,
+                    range = 0.20f..1.0f,
+                    onValueChange = { dragGlowIntensity = it },
+                    onValueChangeFinished = {
+                        val finalVal = dragGlowIntensity ?: effective.glowIntensity
+                        dragGlowIntensity = null
+                        onUpdateAppearance(effective.copy(glowIntensity = finalVal), false)
+                    }
+                )
+            }
+
             ToggleRow(
                 title = "Show weekday letters (M–S)",
-                subtitle = "Minimalist labels above each circle",
-                checked = draft.showDayLetters,
-                onCheckedChange = { commitDraft(draft.copy(showDayLetters = it)) }
+                subtitle = "Minimalist weekday initials above each circle",
+                checked = effective.showDayLetters,
+                onCheckedChange = { onUpdateAppearance(effective.copy(showDayLetters = it), false) }
             )
+
             ToggleRow(
                 title = "Show short note on lock screen",
-                subtitle = "Display optional subtitle below reminder",
-                checked = draft.showDescription,
-                onCheckedChange = { commitDraft(draft.copy(showDescription = it)) }
+                subtitle = if (hasTodayNote) {
+                    "Displays today's saved note below the reminder"
+                } else {
+                    "No short note on today's reminder yet (add one in Reminders)"
+                },
+                checked = effective.showDescription,
+                onCheckedChange = { onUpdateAppearance(effective.copy(showDescription = it), false) }
             )
+
             ToggleRow(
                 title = "Uppercase reminder title",
                 subtitle = "Editorial all-caps styling",
-                checked = draft.uppercaseTitle,
-                onCheckedChange = { commitDraft(draft.copy(uppercaseTitle = it)) }
+                checked = effective.uppercaseTitle,
+                onCheckedChange = { onUpdateAppearance(effective.copy(uppercaseTitle = it), false) }
             )
+
             ToggleRow(
-                title = "Auto-update at midnight & edits",
-                subtitle = "Refresh lock screen when reminders or date change",
-                checked = draft.autoApplyLockScreen,
-                onCheckedChange = { commitDraft(draft.copy(autoApplyLockScreen = it)) }
+                title = "Auto-update lock screen",
+                subtitle = "Automatically syncs lock screen after edits and at midnight",
+                checked = effective.autoApplyLockScreen,
+                onCheckedChange = { onUpdateAppearance(effective.copy(autoApplyLockScreen = it), false) }
             )
 
             Button(
-                onClick = { commitDraft(draft, applyToLockScreen = true) },
+                onClick = { onUpdateAppearance(effective, true) },
                 enabled = !uiState.isApplyingWallpaper,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp)
