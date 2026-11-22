@@ -11,13 +11,18 @@ import com.daydot.lockscreen.domain.WeekDaySlot
 import com.daydot.lockscreen.scheduling.AlarmScheduler
 import com.daydot.lockscreen.wallpaper.WallpaperApplyResult
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.LocalDate
 
 data class DayDotUiState(
@@ -26,6 +31,7 @@ data class DayDotUiState(
     val weekSlots: List<WeekDaySlot> = emptyList(),
     val todayReminder: ReminderEntity? = null,
     val appearance: AppearanceSettings = AppearanceSettings(),
+    val isAppearanceLoaded: Boolean = false,
     val isApplyingWallpaper: Boolean = false,
     val fallbackReason: String? = null
 )
@@ -46,15 +52,25 @@ class DayDotViewModel(application: Application) : AndroidViewModel(application) 
     private val _pendingEditDate = MutableStateFlow<LocalDate?>(null)
     val pendingEditDate: StateFlow<LocalDate?> = _pendingEditDate.asStateFlow()
 
+    private val saveMutex = Mutex()
     private var applyJob: Job? = null
+    private var debouncedAutoApplyJob: Job? = null
 
+    private val loadedAppearanceFlow = appearanceRepo.settingsFlow
+        .map { true to it }
+        .onStart { emit(false to AppearanceSettings()) }
+
+    /**
+     * Uses SharingStarted.Eagerly so persisted DataStore settings stay hot for the
+     * entire ViewModel lifecycle and never reset to default values on tab/app switches.
+     */
     val uiState: StateFlow<DayDotUiState> = combine(
         _today,
         reminderRepo.observeAllReminders(),
-        appearanceRepo.settingsFlow,
+        loadedAppearanceFlow,
         _isApplying,
         _fallbackReason
-    ) { today, allReminders, appearance, isApplying, fallbackReason ->
+    ) { today, allReminders, (isLoaded, appearance), isApplying, fallbackReason ->
         val (monday, sunday) = WeekCalculator.weekBounds(today)
         val weekReminders = allReminders.filter {
             val d = it.localDate()
@@ -69,12 +85,13 @@ class DayDotViewModel(application: Application) : AndroidViewModel(application) 
             weekSlots = weekSlots,
             todayReminder = todayReminder,
             appearance = appearance,
+            isAppearanceLoaded = isLoaded,
             isApplyingWallpaper = isApplying,
             fallbackReason = fallbackReason
         )
     }.stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
+        started = SharingStarted.Eagerly,
         initialValue = DayDotUiState()
     )
 
@@ -150,17 +167,31 @@ class DayDotViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Saves appearance settings to DataStore without spamming WallpaperManager on every
-     * slider drag. Only applies to the Android lock screen when [applyImmediately] is true.
+     * Persists appearance changes sequentially via [saveMutex] (ignoring any premature
+     * writes before DataStore finishes loading), then either applies immediately or
+     * schedules a single debounced lock-screen sync so the wallpaper stays in sync
+     * without rapid setBitmap() spamming.
      */
     fun updateAppearance(settings: AppearanceSettings, applyImmediately: Boolean = false) {
+        if (!uiState.value.isAppearanceLoaded) return
+
         viewModelScope.launch {
-            appearanceRepo.saveSettings(settings)
+            saveMutex.withLock {
+                appearanceRepo.saveSettings(settings)
+            }
+
             if (applyImmediately) {
+                debouncedAutoApplyJob?.cancel()
                 applyToLockScreen(
                     silent = false,
                     customSuccess = "Appearance applied to lock screen."
                 )
+            } else if (settings.autoApplyLockScreen) {
+                debouncedAutoApplyJob?.cancel()
+                debouncedAutoApplyJob = viewModelScope.launch {
+                    delay(450L)
+                    applyToLockScreen(silent = true)
+                }
             }
         }
     }
@@ -173,6 +204,8 @@ class DayDotViewModel(application: Application) : AndroidViewModel(application) 
         applyJob = viewModelScope.launch {
             _isApplying.value = true
             try {
+                // Ensure any in-flight DataStore write completes before rendering
+                saveMutex.withLock { }
                 val result = wallpaperManager.renderAndApplyLockScreen(_today.value)
                 if (!silent) {
                     handleApplyResult(result, customSuccess = customSuccess)
@@ -190,6 +223,7 @@ class DayDotViewModel(application: Application) : AndroidViewModel(application) 
         applyJob = viewModelScope.launch {
             _isApplying.value = true
             try {
+                saveMutex.withLock { }
                 val exportResult = wallpaperManager.exportLockScreenImageToGallery(_today.value)
                 exportResult.onSuccess { uri ->
                     val launched = wallpaperManager.launchSystemWallpaperPicker(uri)
